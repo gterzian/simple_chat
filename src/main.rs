@@ -31,19 +31,16 @@ fn time_roundtrip<F: FnMut()>(mut f: F) -> Duration {
 }
 
 fn acknowledge_receipt(stream: &mut TcpStream) {
-    stream.set_nonblocking(false).expect("set_nonblocking call failed");
     let _ = stream.write("ACK".as_bytes());
     stream.flush().unwrap();
 }
 
 fn wait_for_ack(stream: &mut TcpStream) {
-    stream.set_nonblocking(false).expect("set_nonblocking call failed");
     let mut buffer = [0; 3];
     let _ = stream.read(&mut buffer);
 }
 
 fn send_chat(stream: &mut TcpStream, chat: &str) {
-    stream.set_nonblocking(false).expect("set_nonblocking call failed");
     let _ = stream.write(chat.as_bytes());
     stream.flush().unwrap();
 }
