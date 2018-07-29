@@ -30,6 +30,24 @@ fn time_roundtrip<F: FnMut()>(mut f: F) -> Duration {
     sys_time.elapsed().unwrap()
 }
 
+fn acknowledge_receipt(stream: &mut TcpStream) {
+    stream.set_nonblocking(false).expect("set_nonblocking call failed");
+    let _ = stream.write("ACK".as_bytes());
+    stream.flush().unwrap();
+}
+
+fn wait_for_ack(stream: &mut TcpStream) {
+    stream.set_nonblocking(false).expect("set_nonblocking call failed");
+    let mut buffer = [0; 3];
+    let _ = stream.read(&mut buffer);
+}
+
+fn send_chat(stream: &mut TcpStream, chat: &str) {
+    stream.set_nonblocking(false).expect("set_nonblocking call failed");
+    let _ = stream.write(chat.as_bytes());
+    stream.flush().unwrap();
+}
+
 fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg> {
     let (chan, port) = channel();
     let _ = thread::Builder::new().spawn(move || {
@@ -38,12 +56,10 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
             let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
             let client = listener.accept();
             if let Ok((mut stream, _)) = client {
-                let response = "Lets chat!!";
-                stream.write(response.as_bytes()).unwrap();
-                stream.flush().unwrap();
+                let handshake = "Lets chat!!";
+                send_chat(&mut stream, &handshake);
                 // Handle the first ACK from client...
-                let mut buffer = [0; 3];
-                let _ = stream.read(&mut buffer);
+                wait_for_ack(&mut stream);
                 stream.set_nonblocking(true).expect("set_nonblocking call failed");
                 loop {
                     let mut buffer = [0; 24];
@@ -54,9 +70,7 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                                 // Client disconnected, start accepting the next one...
                                 break
                             }
-                            stream.set_nonblocking(false).expect("set_nonblocking call failed");
-                            let _ = stream.write("ACK".as_bytes());
-                            stream.flush().unwrap();
+                            acknowledge_receipt(&mut stream);
                             let _ = main_chan.send(MainControlMsg::IncomingMessage(message.to_string()));
                             if let Ok(control_msg) = port.recv() {
                                 let chat: String = match control_msg {
@@ -67,10 +81,8 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                                     },
                                 };
                                 let duration = time_roundtrip(|| {
-                                    let _ = stream.write(chat.as_bytes());
-                                    stream.flush().unwrap();
-                                    let mut buffer = [0; 3];
-                                    let _ = stream.read(&mut buffer);
+                                    send_chat(&mut stream, chat.as_str());
+                                    wait_for_ack(&mut stream);
                                 });
                                 let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
                                 stream.set_nonblocking(true).expect("set_nonblocking call failed");
@@ -96,9 +108,7 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
             let mut buffer = [0; 24];
             match stream.read(&mut buffer) {
                 Ok(_) => {
-                    stream.set_nonblocking(false).expect("set_nonblocking call failed");
-                    let _ = stream.write("ACK".as_bytes());
-                    stream.flush().unwrap();
+                    acknowledge_receipt(&mut stream);
                     let response = String::from_utf8_lossy(&buffer[..]);
                     if response == EMPTY_MESSAGE {
                         // Server is gone, disconnect...
@@ -113,10 +123,8 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                             },
                         };
                         let duration = time_roundtrip(|| {
-                            let _ = stream.write(chat.as_bytes());
-                            stream.flush().unwrap();
-                            let mut buffer = [0; 3];
-                            let _ = stream.read(&mut buffer);
+                            send_chat(&mut stream, chat.as_str());
+                            wait_for_ack(&mut stream);
                         });
                         let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
                         stream.set_nonblocking(true).expect("set_nonblocking call failed");
