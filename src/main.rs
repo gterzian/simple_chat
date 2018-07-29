@@ -4,7 +4,7 @@ use std::env;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, channel};
-use std::thread;
+use std::thread::{self, sleep};
 use std::time::{Duration, SystemTime};
 
 
@@ -178,6 +178,8 @@ fn test_server_and_client_messaging() {
     let (server_chan, server_port) = channel();
     let (client_chan, client_port) = channel();
     let server = start_server(server_chan);
+    // Ensure the server has had time to start.
+    sleep(Duration::new(1, 0));
     let client = start_client(client_chan.clone());
     let mut server_msgs = server_port.iter();
     let mut client_msgs = client_port.iter();
