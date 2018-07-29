@@ -23,6 +23,13 @@ enum ComponentControlMsg {
 
 const EMPTY_MESSAGE: &'static str = "\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}";
 
+
+fn time_roundtrip<F: FnMut()>(mut f: F) -> Duration {
+    let sys_time = SystemTime::now();
+    f();
+    sys_time.elapsed().unwrap()
+}
+
 fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg> {
     let (chan, port) = channel();
     let _ = thread::Builder::new().spawn(move || {
@@ -59,12 +66,12 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                                         break
                                     },
                                 };
-                                let _ = stream.write(chat.as_bytes());
-                                stream.flush().unwrap();
-                                let sys_time = SystemTime::now();
-                                let mut buffer = [0; 3];
-                                let _ = stream.read(&mut buffer);
-                                let duration = sys_time.elapsed().unwrap();
+                                let duration = time_roundtrip(|| {
+                                    let _ = stream.write(chat.as_bytes());
+                                    stream.flush().unwrap();
+                                    let mut buffer = [0; 3];
+                                    let _ = stream.read(&mut buffer);
+                                });
                                 let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
                                 stream.set_nonblocking(true).expect("set_nonblocking call failed");
                             }
@@ -105,12 +112,12 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                                 break;
                             },
                         };
-                        let _ = stream.write(chat.as_bytes());
-                        stream.flush().unwrap();
-                        let sys_time = SystemTime::now();
-                        let mut buffer = [0; 3];
-                        let _ = stream.read(&mut buffer);
-                        let duration = sys_time.elapsed().unwrap();
+                        let duration = time_roundtrip(|| {
+                            let _ = stream.write(chat.as_bytes());
+                            stream.flush().unwrap();
+                            let mut buffer = [0; 3];
+                            let _ = stream.read(&mut buffer);
+                        });
                         let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
                         stream.set_nonblocking(true).expect("set_nonblocking call failed");
                     }
