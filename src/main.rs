@@ -1,9 +1,9 @@
 extern crate tinyfiledialogs;
 
 use std::env;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -48,11 +48,46 @@ fn send_chat(stream: &mut TcpStream, chat: &str) {
     stream.flush().unwrap();
 }
 
+fn wait_for_message(stream: &mut TcpStream,
+                    main_chan: &Sender<MainControlMsg>)
+                    -> bool {
+    let mut buffer = [0; 24];
+    let _ = stream.read(&mut buffer);
+    let message = String::from_utf8_lossy(&buffer[..]);
+    if message == EMPTY_MESSAGE {
+        // Peer disconnected
+        return false;
+    }
+    acknowledge_receipt(stream);
+    let _ = main_chan.send(MainControlMsg::IncomingMessage(message.to_string()));
+    true
+}
+
+fn wait_for_input(stream: &mut TcpStream,
+                main_chan: &Sender<MainControlMsg>,
+                port: &Receiver<ComponentControlMsg>)
+                -> bool {
+    if let Ok(control_msg) = port.recv() {
+        let chat: String = match control_msg {
+            ComponentControlMsg::OutgoingMessage(chat) => chat,
+            ComponentControlMsg::Quit => {
+                return false;
+            },
+        };
+        let duration = time_roundtrip(|| {
+            send_chat(stream, chat.as_str());
+            wait_for_ack(stream);
+        });
+        let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
+    }
+    true
+}
+
 fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg> {
     let (chan, port) = channel();
     let _ = thread::Builder::new().spawn(move || {
-        let mut running = true;
-        while running {
+        let mut keep_accepting = true;
+        while keep_accepting {
             let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
             let client = listener.accept();
             if let Ok((mut stream, _)) = client {
@@ -60,36 +95,13 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                 send_chat(&mut stream, &handshake);
                 // Handle the first ACK from client...
                 wait_for_ack(&mut stream);
-                stream.set_nonblocking(true).expect("set_nonblocking call failed");
                 loop {
-                    let mut buffer = [0; 24];
-                    match stream.read(&mut buffer) {
-                        Ok(_) => {
-                            let message = String::from_utf8_lossy(&buffer[..]);
-                            if message == EMPTY_MESSAGE {
-                                // Client disconnected, start accepting the next one...
-                                break
-                            }
-                            acknowledge_receipt(&mut stream);
-                            let _ = main_chan.send(MainControlMsg::IncomingMessage(message.to_string()));
-                            if let Ok(control_msg) = port.recv() {
-                                let chat: String = match control_msg {
-                                    ComponentControlMsg::OutgoingMessage(chat) => chat,
-                                    ComponentControlMsg::Quit => {
-                                        running = false;
-                                        break
-                                    },
-                                };
-                                let duration = time_roundtrip(|| {
-                                    send_chat(&mut stream, chat.as_str());
-                                    wait_for_ack(&mut stream);
-                                });
-                                let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
-                                stream.set_nonblocking(true).expect("set_nonblocking call failed");
-                            }
-                        },
-                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                        Err(_) => break, // Client disconnected, start accepting the next.
+                    if !wait_for_message(&mut stream, &main_chan) {
+                        break;
+                    }
+                    keep_accepting = wait_for_input(&mut stream, &main_chan, &port);
+                    if !keep_accepting {
+                        break;
                     }
                 }
             }
@@ -103,35 +115,12 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
     let (chan, port) = channel();
     let _ = thread::Builder::new().spawn(move || {
         let mut stream = TcpStream::connect("127.0.0.1:8000").expect("please start server first");
-        stream.set_nonblocking(true).expect("set_nonblocking call failed");
         loop {
-            let mut buffer = [0; 24];
-            match stream.read(&mut buffer) {
-                Ok(_) => {
-                    acknowledge_receipt(&mut stream);
-                    let response = String::from_utf8_lossy(&buffer[..]);
-                    if response == EMPTY_MESSAGE {
-                        // Server is gone, disconnect...
-                        break;
-                    }
-                    let _ = main_chan.send(MainControlMsg::IncomingMessage(response.to_string()));
-                    if let Ok(control_msg) = port.recv() {
-                        let chat: String = match control_msg {
-                            ComponentControlMsg::OutgoingMessage(chat) => chat,
-                            ComponentControlMsg::Quit => {
-                                break;
-                            },
-                        };
-                        let duration = time_roundtrip(|| {
-                            send_chat(&mut stream, chat.as_str());
-                            wait_for_ack(&mut stream);
-                        });
-                        let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
-                        stream.set_nonblocking(true).expect("set_nonblocking call failed");
-                    }
-                },
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(e) => panic!("encountered IO error: {}", e),
+            if !wait_for_message(&mut stream, &main_chan) {
+                break;
+            }
+            if !wait_for_input(&mut stream, &main_chan, &port) {
+                break;
             }
         }
         let _ = main_chan.send(MainControlMsg::ClientDisconnected);
