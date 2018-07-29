@@ -4,7 +4,7 @@ use std::env;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, channel};
-use std::thread::{self, sleep};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
 
@@ -173,70 +173,76 @@ fn main() {
     }
 }
 
-#[test]
-fn test_server_and_client_messaging() {
-    let (server_chan, server_port) = channel();
-    let (client_chan, client_port) = channel();
-    let server = start_server(server_chan);
-    // Ensure the server has had time to start.
-    sleep(Duration::new(1, 0));
-    let client = start_client(client_chan.clone());
-    let mut server_msgs = server_port.iter();
-    let mut client_msgs = client_port.iter();
-    assert!(client_msgs.next().is_some());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread::sleep;
 
-    // Send a message to the server, via the client component.
-    let _ = client.send(ComponentControlMsg::OutgoingMessage("test one".to_string()));
-    let from_client_message = "test one\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
-    assert_eq!(server_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_client_message));
-    // Check that we got the roundtrip message from the client component.
-    let mut roundtrip = false;
-    if let Some(MainControlMsg::RoundTrip(_)) = client_msgs.next() {
-        roundtrip = true;
+    #[test]
+    fn test_server_and_client_messaging() {
+        let (server_chan, server_port) = channel();
+        let (client_chan, client_port) = channel();
+        let server = start_server(server_chan);
+        // Ensure the server has had time to start.
+        sleep(Duration::new(1, 0));
+        let client = start_client(client_chan.clone());
+        let mut server_msgs = server_port.iter();
+        let mut client_msgs = client_port.iter();
+        assert!(client_msgs.next().is_some());
+
+        // Send a message to the server, via the client component.
+        let _ = client.send(ComponentControlMsg::OutgoingMessage("test one".to_string()));
+        let from_client_message = "test one\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
+        assert_eq!(server_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_client_message));
+        // Check that we got the roundtrip message from the client component.
+        let mut roundtrip = false;
+        if let Some(MainControlMsg::RoundTrip(_)) = client_msgs.next() {
+            roundtrip = true;
+        }
+        assert!(roundtrip);
+
+        // Send a message to the client, via the server.
+        let _ = server.send(ComponentControlMsg::OutgoingMessage("test two".to_string()));
+        let from_server_message = "test two\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
+        assert_eq!(client_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_server_message));
+        // Check that we got the roundtrip message from the server component.
+        let mut server_roundtrip = false;
+        if let Some(MainControlMsg::RoundTrip(_)) = server_msgs.next() {
+            server_roundtrip = true;
+        }
+        assert!(server_roundtrip);
+
+        // Disconnect the client.
+        let _ = client.send(ComponentControlMsg::Quit);
+        // Check that the client disconnects
+        let disconnect = client_msgs.next().unwrap();
+        assert_eq!(MainControlMsg::ClientDisconnected, disconnect);
+
+        // Start a new client.
+        let client_2 = start_client(client_chan);
+        // Check that we got the "let's chat" handshake from the server.
+        assert!(client_msgs.next().is_some());
+
+        // Send a message to the server, via the new client component.
+        let _ = client_2.send(ComponentControlMsg::OutgoingMessage("test three".to_string()));
+        let from_client_2_message = "test three\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
+        assert_eq!(server_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_client_2_message));
+
+        // Check that we got the roundtrip message from the client component.
+        let mut roundtrip_2 = false;
+        if let Some(MainControlMsg::RoundTrip(_)) = client_msgs.next() {
+            roundtrip_2 = true;
+        }
+        assert!(roundtrip_2);
+
+        // Cleaning up.
+        let _ = server.send(ComponentControlMsg::Quit);
+        // Check that the server shuts down.
+        let disconnect = server_msgs.next().unwrap();
+        assert_eq!(MainControlMsg::ServerShutDown, disconnect);
+
+        // Check that the client disconnects when the server is gone.
+        let disconnect = client_msgs.next().unwrap();
+        assert_eq!(MainControlMsg::ClientDisconnected, disconnect);
     }
-    assert!(roundtrip);
-
-    // Send a message to the client, via the server.
-    let _ = server.send(ComponentControlMsg::OutgoingMessage("test two".to_string()));
-    let from_server_message = "test two\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
-    assert_eq!(client_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_server_message));
-    // Check that we got the roundtrip message from the server component.
-    let mut server_roundtrip = false;
-    if let Some(MainControlMsg::RoundTrip(_)) = server_msgs.next() {
-        server_roundtrip = true;
-    }
-    assert!(server_roundtrip);
-
-    // Disconnect the client.
-    let _ = client.send(ComponentControlMsg::Quit);
-    // Check that the client disconnects
-    let disconnect = client_msgs.next().unwrap();
-    assert_eq!(MainControlMsg::ClientDisconnected, disconnect);
-
-    // Start a new client.
-    let client_2 = start_client(client_chan);
-    // Check that we got the "let's chat" handshake from the server.
-    assert!(client_msgs.next().is_some());
-
-    // Send a message to the server, via the new client component.
-    let _ = client_2.send(ComponentControlMsg::OutgoingMessage("test three".to_string()));
-    let from_client_2_message = "test three\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}".to_string();
-    assert_eq!(server_msgs.next().unwrap(), MainControlMsg::IncomingMessage(from_client_2_message));
-
-    // Check that we got the roundtrip message from the client component.
-    let mut roundtrip_2 = false;
-    if let Some(MainControlMsg::RoundTrip(_)) = client_msgs.next() {
-        roundtrip_2 = true;
-    }
-    assert!(roundtrip_2);
-
-    // Cleaning up.
-    let _ = server.send(ComponentControlMsg::Quit);
-    // Check that the server shuts down.
-    let disconnect = server_msgs.next().unwrap();
-    assert_eq!(MainControlMsg::ServerShutDown, disconnect);
-
-    // Check that the client disconnects when the server is gone.
-    let disconnect = client_msgs.next().unwrap();
-    assert_eq!(MainControlMsg::ClientDisconnected, disconnect);
 }
