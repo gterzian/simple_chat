@@ -67,9 +67,7 @@ fn wait_for_input(stream: &mut TcpStream,
     if let Ok(control_msg) = port.recv() {
         let chat: String = match control_msg {
             ComponentControlMsg::OutgoingMessage(chat) => chat,
-            ComponentControlMsg::Quit => {
-                return false;
-            },
+            ComponentControlMsg::Quit => return false,
         };
         let duration = time_roundtrip(|| {
             send_chat(stream, chat.as_str());
