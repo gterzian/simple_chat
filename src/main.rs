@@ -125,7 +125,6 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
     chan
 }
 
-
 fn main() {
     let mut arguments = env::args();
     let _ = arguments.next();
