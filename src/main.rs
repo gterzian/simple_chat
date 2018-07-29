@@ -92,10 +92,13 @@ fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
                 wait_for_ack(&mut stream);
                 loop {
                     if !wait_for_message(&mut stream, &main_chan) {
+                        // Client disconnect, break out of the loop,
+                        // and start accepting the next one.
                         break;
                     }
                     keep_accepting = wait_for_input(&mut stream, &main_chan, &port);
                     if !keep_accepting {
+                        // Server shutdown.
                         break;
                     }
                 }
@@ -112,9 +115,11 @@ fn start_client(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg
         let mut stream = TcpStream::connect("127.0.0.1:8000").expect("please start server first");
         loop {
             if !wait_for_message(&mut stream, &main_chan) {
+                 // Client disconnects when server is gone.
                 break;
             }
             if !wait_for_input(&mut stream, &main_chan, &port) {
+                // Client also disconnects in responses to a Quit message.
                 break;
             }
         }
