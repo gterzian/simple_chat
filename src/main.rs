@@ -21,8 +21,10 @@ enum ComponentControlMsg {
     Quit
 }
 
+// TODO: implement a proper codec.
+// Currently assuming messages are < 24 bytes, and padding them.
+// Also assuming ACK message is 3 bytes.
 const EMPTY_MESSAGE: &'static str = "\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}";
-
 
 fn time_roundtrip<F: FnMut()>(mut f: F) -> Duration {
     let sys_time = SystemTime::now();
@@ -64,17 +66,19 @@ fn wait_for_input(stream: &mut TcpStream,
                 main_chan: &Sender<MainControlMsg>,
                 port: &Receiver<ComponentControlMsg>)
                 -> bool {
-    if let Ok(control_msg) = port.recv() {
-        let chat: String = match control_msg {
-            ComponentControlMsg::OutgoingMessage(chat) => chat,
-            ComponentControlMsg::Quit => return false,
-        };
-        let duration = time_roundtrip(|| {
-            send_chat(stream, chat.as_str());
-            wait_for_ack(stream);
-        });
-        let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
-    }
+    let control_msg = match port.recv() {
+        Err(_) => return false,
+        Ok(control_msg) => control_msg,
+    };
+    let chat: String = match control_msg {
+        ComponentControlMsg::OutgoingMessage(chat) => chat,
+        ComponentControlMsg::Quit => return false,
+    };
+    let duration = time_roundtrip(|| {
+        send_chat(stream, chat.as_str());
+        wait_for_ack(stream);
+    });
+    let _ = main_chan.send(MainControlMsg::RoundTrip(duration));
     true
 }
 
