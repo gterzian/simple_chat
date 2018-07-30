@@ -148,11 +148,11 @@ fn main() {
             Ok(incoming) => incoming,
         };
         let received = match incoming {
+            MainControlMsg::IncomingMessage(received) => received,
             MainControlMsg::RoundTrip(duration) => {
                 println!("Roundtrip took: {:?}", duration);
                 continue
             },
-            MainControlMsg::IncomingMessage(received) => received,
             MainControlMsg::ClientDisconnected => {
                 assert_eq!(server_or_client, "client");
                 print!("No server available, quitting");
