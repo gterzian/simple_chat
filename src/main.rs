@@ -67,8 +67,8 @@ fn wait_for_input(stream: &mut TcpStream,
                 port: &Receiver<ComponentControlMsg>)
                 -> bool {
     let control_msg = match port.recv() {
-        Ok(control_msg) => control_msg,
         Err(_) => return false,
+        Ok(control_msg) => control_msg,
     };
     let chat: String = match control_msg {
         ComponentControlMsg::OutgoingMessage(chat) => chat,
@@ -85,9 +85,9 @@ fn wait_for_input(stream: &mut TcpStream,
 fn start_server(main_chan: Sender<MainControlMsg>) -> Sender<ComponentControlMsg> {
     let (chan, port) = channel();
     let _ = thread::Builder::new().spawn(move || {
+        let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
         let mut keep_accepting = true;
         while keep_accepting {
-            let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
             let client = listener.accept();
             if let Ok((mut stream, _)) = client {
                 let handshake = "Lets chat!!";
