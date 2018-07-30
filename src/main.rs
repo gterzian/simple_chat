@@ -67,8 +67,8 @@ fn wait_for_input(stream: &mut TcpStream,
                 port: &Receiver<ComponentControlMsg>)
                 -> bool {
     let control_msg = match port.recv() {
-        Err(_) => return false,
         Ok(control_msg) => control_msg,
+        Err(_) => return false,
     };
     let chat: String = match control_msg {
         ComponentControlMsg::OutgoingMessage(chat) => chat,
